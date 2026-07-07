@@ -1,23 +1,34 @@
 import pandas as pd
 
 # Load Excel file
-df = pd.read_excel("online_retail_II.xlsx")
+df = pd.read_excel("Recommendation_Dataset.xlsx")
 
-# Remove rows with missing Customer ID
-df = df.dropna(subset=['Customer ID'])
+# Remove extra spaces from column names (good practice)
+df.columns = df.columns.str.strip()
 
-# Remove negative or zero quantities (returns or errors)
-df = df[df['Quantity'] > 0]
+print("Columns found:", df.columns.tolist())
 
-# Remove duplicates
+# Remove rows with missing CustomerID
+df = df.dropna(subset=["CustomerID"])
+
+# Remove negative or zero quantities (returns/cancellations)
+df = df[df["Quantity"] > 0]
+
+# Remove duplicate rows
 df = df.drop_duplicates()
 
-# Optional: convert data types
-df['Customer ID'] = df['Customer ID'].astype(int)
-df['StockCode'] = df['StockCode'].astype(str)
-df['Description'] = df['Description'].astype(str)
+# Convert data types
+df["CustomerID"] = df["CustomerID"].astype(int)
+df["StockCode"] = df["StockCode"].astype(str)
+df["Description"] = df["Description"].astype(str)
 
-# Save cleaned data
+# Optional: calculate total amount
+df["TotalAmount"] = df["Quantity"] * df["Price"]
+
+# Save cleaned dataset
 df.to_csv("cleaned_retail.csv", index=False)
 
-print("✅ Data cleaned and saved as cleaned_retail.csv")
+print("✅ Data cleaned successfully!")
+print("✅ Saved as cleaned_retail.csv")
+print(f"Rows: {len(df)}")
+print(f"Customers: {df['CustomerID'].nunique()}")
