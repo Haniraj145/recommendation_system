@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 import pandas as pd
 from sklearn.cluster import KMeans
-from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -44,6 +44,17 @@ customer_summary = data.groupby("Customer ID").agg({
 }).reset_index()
 
 # ==============================
+# Feature Scaling (fix: K-Means uses Euclidean distance, so
+# Quantity and Price must be on the same scale or Quantity
+# will dominate the clustering)
+# ==============================
+
+scaler = StandardScaler()
+scaled_features = scaler.fit_transform(
+    customer_summary[["Quantity", "Price"]]
+)
+
+# ==============================
 # K-Means Clustering
 # ==============================
 
@@ -55,21 +66,45 @@ kmeans = KMeans(
     n_init=10
 )
 
-customer_summary["Cluster"] = kmeans.fit_predict(
-    customer_summary[["Quantity", "Price"]]
-)
+customer_summary["Cluster"] = kmeans.fit_predict(scaled_features)
 
 # ==============================
-# PCA for Visualization
+# Cluster Characteristics
+# (computed once, used to explain *why* a customer landed
+# in a given cluster - average / min / max Quantity and Price
+# per cluster, based on the raw, unscaled values so it's
+# human-readable on the frontend)
 # ==============================
-pca = PCA(n_components=2)
 
-pca_points = pca.fit_transform(
-    customer_summary[["Quantity", "Price", "TotalAmount"]]
+cluster_stats_df = (
+    customer_summary
+    .groupby("Cluster")
+    .agg(
+        avg_quantity=("Quantity", "mean"),
+        min_quantity=("Quantity", "min"),
+        max_quantity=("Quantity", "max"),
+        avg_price=("Price", "mean"),
+        min_price=("Price", "min"),
+        max_price=("Price", "max"),
+        customer_count=("Customer ID", "count")
+    )
+    .reset_index()
 )
 
-customer_summary["x"] = pca_points[:, 0]
-customer_summary["y"] = pca_points[:, 1]
+cluster_stats = []
+
+for _, row in cluster_stats_df.iterrows():
+    cluster_stats.append({
+        "cluster": int(row["Cluster"]),
+        "avg_quantity": round(float(row["avg_quantity"]), 2),
+        "min_quantity": int(row["min_quantity"]),
+        "max_quantity": int(row["max_quantity"]),
+        "avg_price": round(float(row["avg_price"]), 2),
+        "min_price": round(float(row["min_price"]), 2),
+        "max_price": round(float(row["max_price"]), 2),
+        "customer_count": int(row["customer_count"])
+    })
+
 # ==============================
 # Category Inference
 # ==============================
@@ -130,7 +165,7 @@ def recommend():
             filtered_data["Country"].str.lower() == country.lower()
         ]
 
-    # Customer not found
+    # Customer not found (cold-start case)
     if user not in customer_summary["Customer ID"].values:
 
         return jsonify({
@@ -138,7 +173,7 @@ def recommend():
             "history": [],
             "customer_cluster": None,
             "cluster_distribution": [],
-            "scatter": []
+            "message": "No purchase history found for this customer."
         })
 
     # ==============================
@@ -152,8 +187,12 @@ def recommend():
         ].values[0]
     )
 
+    # fix: exclude the user themselves from their own recommendation
+    # pool, so recommendations reflect *other* similar customers
+    # rather than the user's own repeat purchases
     similar_customers = customer_summary[
-        customer_summary["Cluster"] == user_cluster
+        (customer_summary["Cluster"] == user_cluster) &
+        (customer_summary["Customer ID"] != user)
     ]["Customer ID"]
 
     # ==============================
@@ -237,28 +276,6 @@ def recommend():
     )
 
     # ==============================
-    # Scatter Data
-    # ==============================
-
-    scatter = []
-
-    for _, row in customer_summary.iterrows():
-
-        scatter.append({
-
-            "customerId": int(row["Customer ID"]),
-
-            "cluster": int(row["Cluster"]),
-
-            "x": float(row["x"]),
-
-            "y": float(row["y"]),
-
-            "selected": int(row["Customer ID"]) == user
-
-        })
-
-    # ==============================
     # Customer Statistics
     # ==============================
 
@@ -282,7 +299,10 @@ def recommend():
 
         "cluster_distribution": cluster_distribution,
 
-        "scatter": scatter
+        # fix: expose per-cluster characteristics so the frontend
+        # can explain *why* this customer landed in their cluster,
+        # not just which cluster number they got
+        "cluster_stats": cluster_stats
 
     })
 
