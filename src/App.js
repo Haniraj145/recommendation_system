@@ -11,7 +11,12 @@ function App() {
   const [history, setHistory] = useState([]);
 
   const [customerCluster, setCustomerCluster] = useState(null);
- 
+
+  const [notFoundMessage, setNotFoundMessage] = useState("");
+
+  const [customerQuantity, setCustomerQuantity] = useState(null);
+  const [customerAvgPrice, setCustomerAvgPrice] = useState(null);
+  const [clusterStats, setClusterStats] = useState([]);
 
   const [loading, setLoading] = useState(false);
 
@@ -48,7 +53,16 @@ const [totalClusters, setTotalClusters] = useState(4);
 
         setCustomerCluster(data.customer_cluster);
 
-    
+        // fix: surface the backend's cold-start message
+        // (returned when a Customer ID has no purchase history)
+        setNotFoundMessage(data.message || "");
+
+        // fix: capture the customer's own Quantity/Price and each
+        // cluster's characteristics, needed to explain *why* this
+        // customer was grouped into their assigned cluster
+        setCustomerQuantity(data.customer_quantity ?? null);
+        setCustomerAvgPrice(data.customer_avg_price ?? null);
+        setClusterStats(data.cluster_stats || []);
 
 setTotalClusters(
     data.total_clusters || 4
@@ -180,6 +194,34 @@ setTotalClusters(
     "#ef4444"
 
   ];
+
+  // -----------------------------
+  // Cluster Explanation Helpers
+  // (fix: build a detailed, data-backed explanation of why this
+  // customer landed in their assigned cluster, using the cluster
+  // stats returned by the backend instead of just naming the cluster)
+  // -----------------------------
+
+  const ownClusterStats = clusterStats.find(
+    (c) => c.cluster === customerCluster
+  );
+
+  const describePosition = (value, avg) => {
+    if (value === null || avg === undefined) return "";
+    const diffPercent = ((value - avg) / avg) * 100;
+
+    if (Math.abs(diffPercent) < 10) {
+      return "about the same as";
+    }
+    if (diffPercent > 0) {
+      return `about ${Math.round(diffPercent)}% higher than`;
+    }
+    return `about ${Math.round(Math.abs(diffPercent))}% lower than`;
+  };
+
+  const otherClusters = clusterStats.filter(
+    (c) => c.cluster !== customerCluster
+  );
 
  
     return (
@@ -370,6 +412,115 @@ setTotalClusters(
 
     </div>
 
+    {/* Detailed "Why This Cluster" Card */}
+
+    {ownClusterStats && (
+
+      <div className="bg-white border border-blue-200 rounded-lg p-6 mb-8 shadow-sm">
+
+        <h3 className="text-lg font-semibold text-blue-700 mb-3">
+          Why This Customer Was Grouped Into Cluster {customerCluster}
+        </h3>
+
+        <p className="text-gray-700 leading-7 mb-4">
+          K-Means groups customers by measuring the distance between their{" "}
+          <b>Total Quantity Purchased</b> and <b>Average Product Price</b>{" "}
+          (scaled so both features are weighted fairly) and assigning them
+          to whichever cluster centroid they sit closest to. Here is how
+          this specific customer compares to the centroid of Cluster{" "}
+          {customerCluster}:
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+
+          <div className="bg-blue-50 rounded-lg p-4">
+            <p className="text-sm text-gray-500 mb-1">Total Quantity Purchased</p>
+            <p className="text-xl font-bold text-gray-800">
+              {customerQuantity}
+            </p>
+            <p className="text-sm text-gray-600 mt-1">
+              Cluster {customerCluster} average:{" "}
+              <b>{ownClusterStats.avg_quantity}</b>{" "}
+              (range {ownClusterStats.min_quantity}–{ownClusterStats.max_quantity})
+            </p>
+            <p className="text-sm text-blue-700 mt-1">
+              This customer is{" "}
+              {describePosition(customerQuantity, ownClusterStats.avg_quantity)}{" "}
+              the cluster average.
+            </p>
+          </div>
+
+          <div className="bg-blue-50 rounded-lg p-4">
+            <p className="text-sm text-gray-500 mb-1">Average Product Price</p>
+            <p className="text-xl font-bold text-gray-800">
+              ${customerAvgPrice}
+            </p>
+            <p className="text-sm text-gray-600 mt-1">
+              Cluster {customerCluster} average:{" "}
+              <b>${ownClusterStats.avg_price}</b>{" "}
+              (range ${ownClusterStats.min_price}–${ownClusterStats.max_price})
+            </p>
+            <p className="text-sm text-blue-700 mt-1">
+              This customer is{" "}
+              {describePosition(customerAvgPrice, ownClusterStats.avg_price)}{" "}
+              the cluster average.
+            </p>
+          </div>
+
+        </div>
+
+        <p className="text-gray-700 leading-7 mb-3">
+          Cluster {customerCluster} contains{" "}
+          <b>{ownClusterStats.customer_count}</b> customers in total. K-Means
+          placed this customer here because, after scaling both features,
+          their combined Quantity/Price profile was mathematically closer to
+          this cluster's centroid than to any other cluster's centroid.
+        </p>
+
+        {otherClusters.length > 0 && (
+
+          <div className="mt-4">
+
+            <p className="text-sm font-semibold text-gray-600 mb-2">
+              For comparison, here are the other clusters:
+            </p>
+
+            <div className="overflow-x-auto">
+
+              <table className="min-w-full border rounded-lg text-sm">
+
+                <thead className="bg-gray-100 text-gray-700">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Cluster</th>
+                    <th className="px-3 py-2 text-center">Avg Quantity</th>
+                    <th className="px-3 py-2 text-center">Avg Price</th>
+                    <th className="px-3 py-2 text-center">Customers</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {otherClusters.map((c) => (
+                    <tr key={c.cluster} className="border-t">
+                      <td className="px-3 py-2">Cluster {c.cluster}</td>
+                      <td className="px-3 py-2 text-center">{c.avg_quantity}</td>
+                      <td className="px-3 py-2 text-center">${c.avg_price}</td>
+                      <td className="px-3 py-2 text-center">{c.customer_count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+
+              </table>
+
+            </div>
+
+          </div>
+
+        )}
+
+      </div>
+
+    )}
+
   </>
 )}
 
@@ -476,7 +627,9 @@ setTotalClusters(
     </h3>
 
     <p className="text-gray-400 mt-2">
-      Enter a valid Customer ID to view recommendations.
+      {/* fix: show the backend's specific cold-start message
+          when present, otherwise fall back to the generic hint */}
+      {notFoundMessage || "Enter a valid Customer ID to view recommendations."}
     </p>
 
   </div>
